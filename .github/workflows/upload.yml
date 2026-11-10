@@ -1,0 +1,178 @@
+name: upload
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      at:
+        type: string
+        default: ""
+      tag:
+        type: string
+        default: "p"
+      minutes:
+        type: string
+        default: "110"
+      only:
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: upload
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    steps:
+      - name: 다음 실행 이어 걸기
+        if: ${{ !inputs.dry && inputs.only == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MIN: ${{ inputs.minutes || '110' }}
+        run: |
+          if [ "$MIN" -ge 60 ]; then gh workflow run upload.yml -f dry=false -f minutes=110; fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: kchartbot/kchart
+          ref: livedata
+          path: live
+
+      - uses: actions/checkout@v4
+        with:
+          repository: kchartbot/kchart
+          ref: probe
+          path: probe
+
+      - uses: actions/checkout@v4
+        with:
+          repository: kchartbot/kchart
+          ref: peak
+          path: peak
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 한글 폰트 + 의존성
+        timeout-minutes: 6
+        run: |
+          A="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          fc-list | grep -qi "noto sans cjk" || { sudo timeout 120 apt-get $A update -qq || true; sudo timeout 180 apt-get $A install -y -qq fonts-noto-cjk; }
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 상태 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: out
+          key: upload-state-${{ github.run_id }}
+          restore-keys: upload-state-
+
+      - name: 로그인 상태 풀기
+        env:
+          K: ${{ secrets.DC_PW }}
+        run: |
+          if [ -f out/.dc_session.enc ]; then
+            if [ -n "$K" ]; then
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in out/.dc_session.enc 2>/dev/null | tar -C out -xf - 2>/dev/null || true
+            fi
+            rm -f out/.dc_session.enc
+          fi
+
+      - name: 실행
+        env:
+          CP_KEY: ${{ secrets.CP_KEY }}
+          CP_KEY_2: ${{ secrets.CP_KEY_2 }}
+          CP_KEY_3: ${{ secrets.CP_KEY_3 }}
+          CP_BASE: ${{ secrets.CP_BASE }}
+          DC_GALLERY_ID: ${{ secrets.DC_GALLERY_ID }}
+          DC_MINOR: ${{ vars.DC_MINOR }}
+          DRY_RUN: ${{ inputs.dry && 'true' || 'false' }}
+          OWN_ONLY: ${{ inputs.only }}
+          NOW_OVERRIDE: ${{ inputs.at }}
+          DC_HEADTEXT: 차트
+          DC_HEAD_NO: ${{ vars.DC_HEAD_NO }}
+          DC_ID: ${{ secrets.DC_ID }}
+          DC_PW: ${{ secrets.DC_PW }}
+          DC_ANON_NICK: ${{ vars.DC_ANON_NICK }}
+          DC_ANON_PW: ${{ secrets.DC_ANON_PW }}
+          DC_STORAGE_STATE: ${{ secrets.DC_STORAGE_STATE }}
+          LIVE_DATA: live/data
+          GAISUM_USERS: probe/probe_out/users
+          PEAKS_JSON: peak/peaks.json
+          MIN: ${{ inputs.minutes || '110' }}
+        run: python run.py own --config config.actions.toml --minutes "$MIN"
+
+      - name: 로그인 상태 잠그기
+        if: always()
+        env:
+          K: ${{ secrets.DC_PW }}
+        run: |
+          mkdir -p out
+          rm -f out/.dc_session.enc
+          f=""
+          for x in .dc_session.json .dc_session.who; do
+            if [ -f "out/$x" ]; then f="$f $x"; fi
+          done
+          if [ -n "$f" ] && [ -n "$K" ]; then
+            tar -C out -cf - $f | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:K -out out/.dc_session.enc
+          fi
+          rm -f out/.dc_session.json out/.dc_session.who
+
+      - name: 상태 저장
+        if: ${{ always() && !inputs.dry }}
+        uses: actions/cache/save@v4
+        with:
+          path: out
+          key: upload-state-${{ github.run_id }}
+
+      - name: 예전 상태 캐시 지우기
+        if: ${{ always() && !inputs.dry }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEEP: upload-state-${{ github.run_id }}
+        run: |
+          keys=$(gh cache list --key upload-state- --limit 100 --json key --jq '.[].key' || true)
+          echo "$keys" | grep -qx "$KEEP" || exit 0
+          for k in $keys; do
+            if [ "$k" != "$KEEP" ]; then gh cache delete "$k" || true; fi
+          done
+
+      - name: 만든 이미지 보관
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: own-images
+          path: |
+            out/own_*.png
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: 미리보기 브랜치
+        if: ${{ always() && inputs.dry }}
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "tag 값이 올바르지 않습니다"; exit 1;; esac
+          mkdir -p ../pv && cp out/own_*.png ../pv/ 2>/dev/null || true
+          cd ../pv && git init -q && git checkout -q -b "preview-$TAG"
+          git add -A && git -c user.name=preview -c user.email= commit -qm "preview $(date -u +%FT%TZ)" || exit 0
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "preview-$TAG"

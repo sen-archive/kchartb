@@ -1,0 +1,31 @@
+[bot]
+charts = [
+]
+own_charts = ["own_hot5", "own_melon5", "own_top100", "own_rt", "own_users", "own_predict", "own_hot100", "own_graph", "own_genie", "own_bugs", "own_flo"]
+hourly_after_minute = 5
+hourly_window_minutes = 15
+max_posts = 20
+post_gap_seconds = "6"
+upload_workers = 2
+upload_gap = "25-25"
+upload_retries = 2
+rank_style = "classic"
+precise_top = true
+precise_lead_minutes = 16
+min_request_gap = 3.0
+image_budget = 100
+image_gap = 0.5
+dry_run = true
+user_agent = "chartbot/1.0"
+out_dir = "out"
+
+[dc]
+gallery_id = "CHANGE_ME"
+minor = true
+headtext = "차트"
+
+[dc.heads]
+melon = { text = "멜론", no = "10" }
+genie = { text = "지니", no = "20" }
+bugs = { text = "벅스", no = "30" }
+flo = { text = "플로", no = "40" }
