@@ -295,9 +295,9 @@ def own_loop(cfg, uploader, out, state, minutes):
     retries = int(b.get("upload_retries", 3))
     gate = threading.Lock()
     last_start = [0.0]
-    pace = {}
+    pace = {"own_genie": 60.0, "own_bugs": 60.0, "own_flo": 60.0}
     pause = [0.0]
-    chain = {"own_top100": ("own_graph", 25.0, 60.0), "own_rt": ("own_top100", 25.0, 100.0), "own_hot100": ("own_rt", 25.0, 140.0), "own_bugs": ("own_genie", 30.0, 540.0), "own_flo": ("own_bugs", 30.0, 540.0)}
+    chain = {"own_top100": ("own_graph", 25.0, 60.0), "own_rt": ("own_top100", 25.0, 100.0), "own_hot100": ("own_rt", 25.0, 140.0), "own_bugs": ("own_genie", 60.0, 540.0), "own_flo": ("own_bugs", 60.0, 540.0)}
     started = {}
     deferred = []
     dlk = threading.Lock()
