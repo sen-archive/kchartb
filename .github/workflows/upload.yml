@@ -75,28 +75,35 @@ jobs:
           key: kfonts-v1
 
       - name: 한글 폰트 + 의존성
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
-          A="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          A="-o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::ForceIPv4=true"
+          sudo sed -i 's#https\?://security.ubuntu.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           mkdir -p ~/.fonts ~/.cache/kfonts
           if ! fc-list | grep -qi "noto sans cjk"; then
-            if ls ~/.cache/kfonts/*.ttc >/dev/null 2>&1; then
-              cp ~/.cache/kfonts/*.ttc ~/.fonts/
+            if ls ~/.cache/kfonts/*.ttc ~/.cache/kfonts/*.otf >/dev/null 2>&1; then
+              cp ~/.cache/kfonts/*.ttc ~/.cache/kfonts/*.otf ~/.fonts/ 2>/dev/null || true
               fc-cache -f || true
             else
-              for i in 1 2 3; do
-                sudo timeout 120 apt-get $A update -qq || true
-                if sudo timeout 180 apt-get $A install -y -qq fonts-noto-cjk; then break; fi
-                sleep 20
+              for i in 1 2; do
+                sudo timeout 90 apt-get $A update -qq || true
+                if sudo timeout 150 apt-get $A install -y -qq fonts-noto-cjk; then break; fi
+                sleep 10
               done
             fi
           fi
-          if fc-list | grep -qi "noto sans cjk" && ! ls ~/.cache/kfonts/*.ttc >/dev/null 2>&1; then
-            cp /usr/share/fonts/opentype/noto/NotoSansCJK-*.ttc ~/.cache/kfonts/ 2>/dev/null || true
+          if ! fc-list | grep -qi "noto sans cjk"; then
+            for w in Regular Bold; do
+              curl -fsSL --retry 2 --max-time 120 -o ~/.fonts/NotoSansCJKkr-$w.otf "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansCJKkr-$w.otf" || true
+            done
+            fc-cache -f || true
+          fi
+          if fc-list | grep -qi "noto sans cjk" && ! ls ~/.cache/kfonts/* >/dev/null 2>&1; then
+            cp /usr/share/fonts/opentype/noto/NotoSansCJK-*.ttc ~/.cache/kfonts/ 2>/dev/null || cp ~/.fonts/NotoSansCJKkr-*.otf ~/.cache/kfonts/ 2>/dev/null || true
           fi
           if ! fc-list | grep -qi "noto sans cjk"; then echo "::warning::한글 글꼴을 설치하지 못했습니다"; fi
           pip install -r requirements.txt
-          playwright install --with-deps chromium || playwright install chromium
+          timeout 300 playwright install --with-deps chromium || playwright install chromium
 
       - name: 상태 복원
         uses: actions/cache/restore@v4
